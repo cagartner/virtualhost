@@ -69,6 +69,23 @@ if [ "$action" == 'create' ]
 			root $userDir$rootDir;
 			index index.php index.html index.htm;
 			server_name $domain;
+			access_log /var/log/nginx/$domain.access.log;
+    		error_log /var/log/nginx/$domain.error.log;
+
+    		location / {
+		        index index.html index.php; ## Allow a static html file to be shown first
+		        try_files $uri $uri/ @handler; ## If missing pass the URI to Magento's front handler
+		        expires 30d; ## Assume all files are cachable
+		    }
+
+    		## These locations would be hidden by .htaccess normally
+		    location ^~ /app/                { deny all; }
+		    location ^~ /includes/           { deny all; }
+		    location ^~ /lib/                { deny all; }
+		    location ^~ /media/downloadable/ { deny all; }
+		    location ^~ /pkginfo/            { deny all; }
+		    location ^~ /report/config.xml   { deny all; }
+		    location ^~ /var/                { deny all; }
 
 			# serve static files directly
 			location ~* \.(jpg|jpeg|gif|css|png|js|ico|html)$ {
@@ -76,24 +93,27 @@ if [ "$action" == 'create' ]
 				expires max;
 			}
 
-			# removes trailing slashes (prevents SEO duplicate content issues)
-			if (!-d \$request_filename) {
-				rewrite ^/(.+)/\$ /\$1 permanent;
-			}
+			 location /media {
+		        try_files $uri /2.jpg;
+		    }
 
-			# unless the request is for a valid file (image, js, css, etc.), send to bootstrap
-			if (!-e \$request_filename) {
-				rewrite ^/(.*)\$ /index.php?/\$1 last;
-				break;
-			}
+		    location /var/export/ { ## Allow admins only to view export folder
+		        auth_basic           "Restricted"; ## Message shown in login window
+		        auth_basic_user_file htpasswd; ## See /etc/nginx/htpassword
+		        autoindex            on;
+		    }
 
-			# removes trailing 'index' from all controllers
-			if (\$request_uri ~* index/?\$) {
-				rewrite ^/(.*)/index/?\$ /\$1 permanent;
-			}
+		    location  /. { ## Disable .htaccess and other hidden files
+		        return 404;
+		    }
 
-			# catch all
-			error_page 404 /index.php;
+		    location @handler { ## Magento uses a common front handler
+		        rewrite / /index.php;
+		    }
+
+		    location ~ .php/ { ## Forward paths like /js/index.php/x.js to relevant handler
+		        rewrite ^(.*.php)/ $1 last;
+		    }
 
 			location ~ \.php$ {
 				fastcgi_split_path_info ^(.+\.php)(/.+)\$;
